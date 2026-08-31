@@ -62,7 +62,7 @@ export function grokCapability(profile?: Pick<ProfileConfig, 'permissions'>): Ag
   return {
     agentId: 'grok',
     sessionKind: 'grok-session',
-    promptInjection: 'stdin-prefix',
+    promptInjection: 'append-system-prompt',
     systemPrompt: BRIDGE_SYSTEM_PROMPT,
     supportsNativeHistory: true,
     callback: {

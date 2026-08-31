@@ -6,7 +6,7 @@ import type { Readable } from 'node:stream';
 import { log } from '../../core/logger';
 import { mergeProcessEnv, spawnProcess, type SpawnedProcessByStdio } from '../../platform/spawn';
 import { SpawnFailed } from '../../runtime/errors';
-import { prefixBridgeSystemPrompt } from '../bridge-system-prompt';
+import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
 import { buildLarkChannelEnv, type LarkChannelEnvContext } from '../lark-channel-env';
 import { checkAgentAvailability, type AgentAvailability } from '../preflight';
 import {
@@ -74,10 +74,10 @@ export class GrokAdapter implements AgentAdapter {
       throw new Error('cwd is required for GrokAdapter.run');
     }
 
-    // Grok headless mode does not read the prompt from stdin. Put both the
-    // bridge system prompt and the user prompt in a temp file so special
-    // characters never reach argv / cmd.exe.
-    const promptFile = writePromptFile(prefixBridgeSystemPrompt(opts.prompt, this.botIdentity));
+    // User prompt goes through `--prompt-file` (Grok does not read stdin).
+    // Bridge conventions go through `--rules` so they append to Grok's agent
+    // prompt instead of being mixed into the user turn.
+    const promptFile = writePromptFile(composeUserPrompt(opts.prompt, opts.images));
     const args = buildGrokArgs({
       promptFile: promptFile.path,
       cwd: opts.cwd,
@@ -85,6 +85,7 @@ export class GrokAdapter implements AgentAdapter {
       model: opts.model,
       permissionMode: opts.permissionMode ?? CLAUDE_DEFAULT_PERMISSION_MODE,
       sandbox: opts.sandbox,
+      rules: buildBridgeSystemPrompt(this.botIdentity),
     });
 
     const child = spawnProcess(this.binary, args, {
@@ -101,6 +102,7 @@ export class GrokAdapter implements AgentAdapter {
       cwd: opts.cwd,
       hasSession: Boolean(opts.sessionId),
       promptChars: opts.prompt.length,
+      images: opts.images?.length ?? 0,
       model: opts.model,
     });
 
@@ -196,6 +198,7 @@ async function* createEventStream(
   }
 
   const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  let terminal = false;
   let sawStdout = false;
   let silentExitTimer: ReturnType<typeof setTimeout> | undefined;
   const closeSilentStdout = (): void => {
@@ -215,13 +218,18 @@ async function* createEventStream(
       } catch {
         continue;
       }
-      yield* translateGrokEvent(parsed);
+      for (const event of translateGrokEvent(parsed)) {
+        if (event.type === 'done' || event.type === 'error') terminal = true;
+        yield event;
+      }
     }
   } finally {
     if (silentExitTimer) clearTimeout(silentExitTimer);
     child.removeListener('exit', closeSilentStdout);
     rl.close();
   }
+
+  if (terminal) return;
 
   const earlyRuntimeError = getError();
   if (earlyRuntimeError && child.exitCode === null && child.signalCode === null) {
@@ -259,10 +267,16 @@ async function* createEventStream(
   }
 }
 
+function composeUserPrompt(prompt: string, images: readonly string[] | undefined): string {
+  if (!images?.length) return prompt;
+  const list = images.map((path) => `- ${path}`).join('\n');
+  return `${prompt}\n\n<attached_images>\n${list}\n</attached_images>\n`;
+}
+
 function writePromptFile(content: string): { path: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'lark-grok-'));
   const path = join(dir, 'prompt.md');
-  writeFileSync(path, content, 'utf8');
+  writeFileSync(path, content, { encoding: 'utf8', mode: 0o600 });
   return {
     path,
     cleanup: () => {

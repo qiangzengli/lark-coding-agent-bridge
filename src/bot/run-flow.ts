@@ -148,13 +148,7 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
         input.profileConfig.agentKind,
         input.profileConfig.preferences.model,
       ),
-      images:
-        input.capability.agentId === 'codex'
-          ? policy.attachments
-              .filter((attachment) => attachment.kind === 'image' && attachment.decision === 'accepted')
-              .map((attachment) => attachment.path)
-              .filter((path): path is string => Boolean(path))
-          : undefined,
+      images: nativeImagePaths(input.capability.agentId, policy.attachments),
       stopGraceMs: input.stopGraceMs,
       observability: input.observability,
     });
@@ -209,4 +203,16 @@ export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
       threadId: input.event.threadId,
     });
   }
+}
+
+function nativeImagePaths(
+  agentId: AgentCapability['agentId'],
+  attachments: readonly AgentAttachment[],
+): string[] | undefined {
+  if (agentId !== 'codex' && agentId !== 'grok') return undefined;
+  const paths = attachments
+    .filter((attachment) => attachment.kind === 'image' && attachment.decision === 'accepted')
+    .map((attachment) => attachment.path)
+    .filter((path): path is string => Boolean(path));
+  return paths.length > 0 ? paths : undefined;
 }

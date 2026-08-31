@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GrokAdapter } from '../../src/agent/grok/adapter.js';
 import { buildGrokArgs } from '../../src/agent/grok/argv.js';
-import { prefixBridgeSystemPrompt } from '../../src/agent/bridge-system-prompt.js';
+import { buildBridgeSystemPrompt } from '../../src/agent/bridge-system-prompt.js';
 import type { AgentEvent } from '../../src/agent/types.js';
 
 interface FakeBinary {
@@ -51,12 +51,14 @@ describe('GrokAdapter process contract', () => {
         promptFile: record.promptFile,
         cwd: fake.dir,
         permissionMode: 'acceptEdits',
+        rules: record.rules ?? undefined,
       }),
     );
     expect(record.argv).not.toContain('hello');
-    expect(record.prompt).toBe(prefixBridgeSystemPrompt('hello', undefined));
-    expect(record.prompt).toContain('lark-channel-bridge 运行约定');
-    expect(record.prompt).toContain('__bridge_cb');
+    expect(record.prompt).toBe('hello');
+    expect(record.rules).toBe(buildBridgeSystemPrompt(undefined));
+    expect(record.rules).toContain('lark-channel-bridge 运行约定');
+    expect(record.rules).toContain('__bridge_cb');
     expect(record.argv).not.toContain('--resume');
     expect(record.argv).not.toContain('--model');
   });
@@ -111,6 +113,7 @@ describe('GrokAdapter process contract', () => {
       cwd: fake.dir,
       sessionId: 'sess-old',
       model: 'grok-4.6',
+      sandbox: 'workspace-write',
     });
 
     expect(await collect(run.events)).toEqual([
@@ -118,6 +121,28 @@ describe('GrokAdapter process contract', () => {
     ]);
     const record = await readRecord(fake.recordPath);
     expect(record.argv.slice(-4)).toEqual(['--resume', 'sess-old', '--model', 'grok-4.6']);
+    expect(record.argv).not.toContain('--sandbox');
+  });
+
+  it('lists attached image paths in the prompt file', async () => {
+    const fake = await createFakeGrok({
+      lines: [{ type: 'result', session_id: 'sess-img' }],
+    });
+    cleanup.push(fake.dir);
+    const imagePath = join(fake.dir, 'photo.png');
+
+    const run = new GrokAdapter({ binary: fake.path }).run({
+      runId: 'run-images',
+      prompt: 'look',
+      cwd: fake.dir,
+      images: [imagePath],
+    });
+
+    await collect(run.events);
+    const record = await readRecord(fake.recordPath);
+    expect(record.prompt).toContain('look');
+    expect(record.prompt).toContain('<attached_images>');
+    expect(record.prompt).toContain(imagePath);
   });
 
   it('includes stderr when the process exits non-zero', async () => {
@@ -141,6 +166,33 @@ describe('GrokAdapter process contract', () => {
         message: 'grok exited with code 42: boom',
         terminationReason: 'failed',
       },
+    ]);
+  });
+
+  it('does not emit a second error when the stream already ended with a result error', async () => {
+    const fake = await createFakeGrok({
+      lines: [
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          result: 'boom',
+          session_id: 'sess-err',
+        },
+      ],
+      stderr: 'ignored\n',
+      exitCode: 1,
+    });
+    cleanup.push(fake.dir);
+
+    const run = new GrokAdapter({ binary: fake.path }).run({
+      runId: 'run-result-error',
+      prompt: 'fail',
+      cwd: fake.dir,
+    });
+
+    expect(await collect(run.events)).toEqual([
+      { type: 'error', message: 'boom', terminationReason: 'failed' },
     ]);
   });
 
@@ -175,10 +227,13 @@ async function createFakeGrok(options: {
       'const pfIdx = argv.indexOf("--prompt-file");',
       'const promptFile = pfIdx !== -1 ? argv[pfIdx + 1] : "";',
       'const prompt = promptFile ? readFileSync(promptFile, "utf8") : "";',
+      'const rulesIdx = argv.indexOf("--rules");',
+      'const rules = rulesIdx !== -1 ? argv[rulesIdx + 1] : null;',
       `writeFileSync(${JSON.stringify(recordPath)}, JSON.stringify({`,
       '  argv,',
       '  prompt,',
       '  promptFile,',
+      '  rules,',
       '  cwd: process.cwd(),',
       '  env: {',
       '    LARK_CHANNEL: process.env.LARK_CHANNEL,',
@@ -206,6 +261,7 @@ async function readRecord(path: string): Promise<{
   argv: string[];
   prompt: string;
   promptFile: string;
+  rules: string | null;
   cwd: string;
   env: {
     LARK_CHANNEL?: string;
@@ -220,6 +276,7 @@ async function readRecord(path: string): Promise<{
     argv: string[];
     prompt: string;
     promptFile: string;
+    rules: string | null;
     cwd: string;
     env: {
       LARK_CHANNEL?: string;

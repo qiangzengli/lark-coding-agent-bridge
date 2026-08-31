@@ -9,6 +9,8 @@ export interface BuildGrokArgsInput {
   model?: string;
   permissionMode?: ClaudePermissionMode;
   sandbox?: SandboxMode;
+  /** Appended via `grok --rules`. Omit to leave Grok's default agent prompt. */
+  rules?: string;
 }
 
 /**
@@ -35,8 +37,14 @@ export function buildGrokArgs(input: BuildGrokArgsInput): string[] {
     '--no-auto-update',
     '--verbatim',
   ];
-  const sandbox = grokSandboxProfile(input.sandbox);
-  if (sandbox) args.push('--sandbox', sandbox);
+  if (input.rules) args.push('--rules', input.rules);
+  // A resumed session's sandbox is fixed for its lifetime; passing a different
+  // `--sandbox` is refused. Omit the flag on resume so Grok restores the saved
+  // profile. Fresh runs still map the bridge access mode.
+  if (!input.sessionId) {
+    const sandbox = grokSandboxProfile(input.sandbox);
+    if (sandbox) args.push('--sandbox', sandbox);
+  }
   if (input.sessionId) args.push('--resume', input.sessionId);
   if (input.model) args.push('--model', input.model);
   return args;

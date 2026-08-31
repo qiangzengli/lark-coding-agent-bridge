@@ -117,7 +117,7 @@ describe('CodexAdapter system prompt wiring', () => {
 });
 
 describe('GrokAdapter system prompt wiring', () => {
-  it('prefixes the identity-aware bridge system prompt into --prompt-file', () => {
+  it('appends the identity-aware bridge system prompt via --rules', () => {
     const child = fakeChild();
     spawnMock.spawnProcess.mockReturnValue(child);
     const adapter = new GrokAdapter({ binary: '/usr/local/bin/grok' });
@@ -125,9 +125,8 @@ describe('GrokAdapter system prompt wiring', () => {
 
     adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
 
-    expect(promptFileContent()).toBe(
-      prefixBridgeSystemPrompt('hi', { openId: 'ou_bot_self', name: 'Bridge' }),
-    );
+    expect(promptFileContent()).toBe('hi');
+    expect(rulesArg()).toBe(buildBridgeSystemPrompt({ openId: 'ou_bot_self', name: 'Bridge' }));
   });
 
   it('falls back to the base system prompt when no identity was set', () => {
@@ -137,15 +136,27 @@ describe('GrokAdapter system prompt wiring', () => {
 
     adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
 
-    expect(promptFileContent()).toBe(prefixBridgeSystemPrompt('hi', undefined));
+    expect(promptFileContent()).toBe('hi');
+    expect(rulesArg()).toBe(buildBridgeSystemPrompt(undefined));
   });
 
+  function grokArgs(): string[] {
+    return spawnMock.spawnProcess.mock.calls[0]?.[1] as string[];
+  }
+
   function promptFileContent(): string {
-    const args = spawnMock.spawnProcess.mock.calls[0]?.[1] as string[];
+    const args = grokArgs();
     const flagIndex = args.indexOf('--prompt-file');
     expect(flagIndex).toBeGreaterThan(-1);
     expect(args).toContain('streaming-messages-json');
     return readFileSync(args[flagIndex + 1] as string, 'utf8');
+  }
+
+  function rulesArg(): string {
+    const args = grokArgs();
+    const flagIndex = args.indexOf('--rules');
+    expect(flagIndex).toBeGreaterThan(-1);
+    return args[flagIndex + 1] as string;
   }
 });
 

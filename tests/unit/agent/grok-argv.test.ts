@@ -22,15 +22,14 @@ describe('buildGrokArgs', () => {
     ]);
   });
 
-  it('appends resume, model, and mapped sandbox after the base flags', () => {
+  it('appends rules and mapped sandbox on a fresh run', () => {
     expect(
       buildGrokArgs({
         promptFile: '/tmp/prompt.md',
         cwd: '/repo',
-        sessionId: 'sess-1',
-        model: 'grok-4.6',
         permissionMode: 'acceptEdits',
         sandbox: 'workspace-write',
+        rules: 'bridge rules',
       }),
     ).toEqual([
       '--prompt-file',
@@ -43,13 +42,23 @@ describe('buildGrokArgs', () => {
       '/repo',
       '--no-auto-update',
       '--verbatim',
+      '--rules',
+      'bridge rules',
       '--sandbox',
       'workspace',
-      '--resume',
-      'sess-1',
-      '--model',
-      'grok-4.6',
     ]);
+  });
+
+  it('omits --sandbox on resume so Grok restores the session profile', () => {
+    const args = buildGrokArgs({
+      promptFile: '/tmp/prompt.md',
+      cwd: '/repo',
+      sessionId: 'sess-1',
+      model: 'grok-4.6',
+      sandbox: 'workspace-write',
+    });
+    expect(args).not.toContain('--sandbox');
+    expect(args.slice(-4)).toEqual(['--resume', 'sess-1', '--model', 'grok-4.6']);
   });
 
   it('maps sandbox modes onto Grok profiles and omits full access', () => {

@@ -79,13 +79,13 @@ describe('agent capability contract', () => {
     expect(codexCapability(profile).permissions.maxAccess).toBe('read-only');
   });
 
-  it('defines Grok capability with native sessions and prompt-file injection', () => {
+  it('defines Grok capability with native sessions and appended system prompt', () => {
     const capability = grokCapability();
 
     expect(capability).toMatchObject({
       agentId: 'grok',
       sessionKind: 'grok-session',
-      promptInjection: 'stdin-prefix',
+      promptInjection: 'append-system-prompt',
       supportsNativeHistory: true,
       systemPrompt: BRIDGE_SYSTEM_PROMPT,
       callback: {
